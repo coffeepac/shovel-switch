@@ -6,6 +6,7 @@ import (
   "log"
   "time"
   "fmt"
+  "bytes"
   "strconv"
   json "encoding/json"
   http "net/http"
@@ -14,10 +15,10 @@ import (
 
 var (
     uri          = flag.String("uri", "http://zeroimpact.mtnsatcloud.com:8084/v1.0/connectionStatus/", "ZeroImpact URI")
-    rabbitProg   = flag.String("rabbitProg", "rabbitmqctl", "name of application to use to access rabbit.  only set if not rabbitmqctl or if rabbitmqctl is not in $PATH")
-    rabbitName   = flag.String("rabbitName", "rabbitmq-stopable-shovel", "Node name of rabbit that has the stopable shovels")
+    rabbitProg   = flag.String("rabbitProg", "/etc/init.d/rabbitmq-stopable-shovel", "name of script to start/stop broker")
     pidfile      = flag.String("pidfile", "", "optional, write pid of self to here")
     healthport   = flag.Int("healthport", 7003, "port to listen for ping/quit requests on")
+    verbose      = flag.Bool("verbose", false, "increase logging output")
 )
 
 var (
@@ -94,23 +95,31 @@ func shovelManagement(uri *string, verbose bool) {
             } else {
                 if ziStatus.UsingBats {
                     if verbose {
-                        log.Println( *rabbitProg, "-n " + *rabbitName + " eval" + " 'application:start(rabbitmq_shovel).'")
+                        log.Println(*rabbitProg + " start")
                     }
 
-                    cmd := exec.Command(*rabbitProg, "-n " + *rabbitName, "eval", "'application:start(rabbitmq_shovel).'")
+                    cmd := exec.Command("/etc/init.d/rabbitmq-stopable-shovel", "start")
+                    var out bytes.Buffer
+                    cmd.Stdout = &out
+                    cmd.Stderr = &out
                     err = cmd.Run()
                     if err != nil {
                         log.Printf("start command failed with: %s", err)
+                        log.Printf("outputs were: %s", out)
                     }
                 } else {
                     if verbose {
-                        log.Println(*rabbitProg, "-n " + *rabbitName, "eval", "'application:stop(rabbitmq_shovel).'")
+                        log.Println(*rabbitProg + " stop")
                     }
 
-                    cmd := exec.Command(*rabbitProg, "-n " + *rabbitName, "eval", "'application:stop(rabbitmq_shovel).'")
+                    cmd := exec.Command("/etc/init.d/rabbitmq-stopable-shovel", "stop")
+                    var out bytes.Buffer
+                    cmd.Stdout = &out
+                    cmd.Stderr = &out
                     err = cmd.Run()
                     if err != nil {
                         log.Printf("stop command failed with: %s", err)
+                        log.Printf("outputs were: %s", out)
                     }
                 }
             }
@@ -132,7 +141,7 @@ func main(){
     check_pidfile()
 
     //  manage the stopable shovel
-    go shovelManagement(uri, false)
+    go shovelManagement(uri, *verbose)
 
     //  status Server also handles quiting
     quitChan = make(chan bool)
