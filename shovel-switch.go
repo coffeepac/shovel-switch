@@ -25,7 +25,7 @@ var (
 )
 
 type zeroimpactResponse struct {
-    usingBats bool `json:"usingBats"`
+    UsingBats bool `json:"usingBats"`
 }
 
 /*
@@ -33,7 +33,6 @@ type zeroimpactResponse struct {
 *   kill application when told to
 */
 func statusServer(quitChan chan bool) {
-    log.Println("servin'")
     http.HandleFunc("/ping", pingHandle)
     http.HandleFunc("/quit", quitHandle)
 
@@ -64,7 +63,19 @@ func check_pidfile(){
     }
 }
 
-func shovelManagement(uri *string) {
+/*
+**  remove_pidfile - if pidfile flag is set, remove when shutting down
+*/
+func remove_pidfile(){
+    if *pidfile != "" {
+        err := os.Remove(*pidfile)
+        if err != nil {
+            log.Println("Could not remove pidfile:  " + *pidfile + ". With error: " + err.Error())
+        }
+    }
+}
+
+func shovelManagement(uri *string, verbose bool) {
     //  run forever!
     //   verified that stopping a stoped shovel or starting a started shovel doesn't
     //   effect the rabbit broker.  the rabbit broker informs the caller that the 
@@ -79,15 +90,23 @@ func shovelManagement(uri *string) {
             decoder := json.NewDecoder(resp.Body)
             err = decoder.Decode(&ziStatus)
             if err != nil {
-                log.Printf("failed to decode zi response\n")
+                log.Printf("failed to decode zi response, %s\n", err)
             } else {
-                if ziStatus.usingBats {
+                if ziStatus.UsingBats {
+                    if verbose {
+                        log.Println( *rabbitProg, "-n " + *rabbitName + " eval" + " 'application:start(rabbitmq_shovel).'")
+                    }
+
                     cmd := exec.Command(*rabbitProg, "-n " + *rabbitName, "eval", "'application:start(rabbitmq_shovel).'")
                     err = cmd.Run()
                     if err != nil {
                         log.Printf("start command failed with: %s", err)
                     }
                 } else {
+                    if verbose {
+                        log.Println(*rabbitProg, "-n " + *rabbitName, "eval", "'application:stop(rabbitmq_shovel).'")
+                    }
+
                     cmd := exec.Command(*rabbitProg, "-n " + *rabbitName, "eval", "'application:stop(rabbitmq_shovel).'")
                     err = cmd.Run()
                     if err != nil {
@@ -97,7 +116,7 @@ func shovelManagement(uri *string) {
             }
         }
 
-        <-time.After(5 * time.Second)
+        time.Sleep(5 * time.Second)
     }
 }
 
@@ -106,13 +125,14 @@ func shovelManagement(uri *string) {
 **  main - handles creation of main go routines
 **       - flag parsing
 **       - server creation
+**       - pidfile handling
 */
 func main(){
     flag.Parse()
     check_pidfile()
 
     //  manage the stopable shovel
-    go shovelManagement(uri)
+    go shovelManagement(uri, false)
 
     //  status Server also handles quiting
     quitChan = make(chan bool)
@@ -120,6 +140,6 @@ func main(){
 
     //  block until quitting time
     <-quitChan
-
+    remove_pidfile()
 }
 
