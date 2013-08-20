@@ -139,6 +139,7 @@ func shovelManagement(uri *string, verbose bool) {
 func main(){
     flag.Parse()
     check_pidfile()
+    defer remove_pidfile()
 
     //  manage the stopable shovel
     go shovelManagement(uri, *verbose)
@@ -149,6 +150,5 @@ func main(){
 
     //  block until quitting time
     <-quitChan
-    remove_pidfile()
 }
 
