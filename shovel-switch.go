@@ -37,7 +37,13 @@ func statusServer(quitChan chan bool) {
     http.HandleFunc("/ping", pingHandle)
     http.HandleFunc("/quit", quitHandle)
 
-    http.ListenAndServe(":7003", nil)
+    //  create server that doesn't leave things open forever
+    s := &http.Server{
+            Addr:           ":7003",
+            ReadTimeout:    10 * time.Second,
+            WriteTimeout:   10 * time.Second,
+        }
+    s.ListenAndServe()
 }
 
 func pingHandle(w http.ResponseWriter, r *http.Request){
