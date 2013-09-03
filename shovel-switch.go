@@ -90,6 +90,7 @@ func shovelManagement(uri *string, verbose bool) {
             var ziStatus zeroimpactResponse
             decoder := json.NewDecoder(resp.Body)
             err = decoder.Decode(&ziStatus)
+            resp.Body.Close()
             if err != nil {
                 log.Printf("failed to decode zi response, %s\n", err)
             } else {
