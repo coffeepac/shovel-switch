@@ -12,7 +12,8 @@ import (
 
 func TestStatusServer(t *testing.T) {
     quitChan = make(chan bool, 1)
-    go statusServer(quitChan)
+    chefStatusChan = make(chan bool, 1)
+    go statusServer(quitChan, chefStatusChan)
 
     //  let the other go routine get started
     time.Sleep(1 * time.Millisecond)
@@ -87,16 +88,24 @@ func ziOffHandle(w http.ResponseWriter, r *http.Request){
 
 func TestShovelManagement(t *testing.T){
     dummyRabbit := "echo"
-    rabbitProg = &dummyRabbit
+    rabbitProg = dummyRabbit
+
+    ziStatusFeeds := make(map[string] chan bool, 2)
+    ziStatusFeeds["shovel"] = make(chan bool, 10)
+    ziStatusFeeds["chef"] = make(chan bool, 10)
 
     go dummyZI()
+    time.Sleep(1 * time.Second)
+
     goodUri := "http://localhost:7000/ZIOn"
-    go shovelManagement(&goodUri, true)
+    go zeroImpactMonitor(&goodUri, ziStatusFeeds, true)
+    go shovelManagement(ziStatusFeeds["shovel"], true)
+    go chefClientExecutor(ziStatusFeeds["chef"], chefStatusChan, true)
 
     time.Sleep(1 * time.Second)
 
     badUri := "http://localhost:7000/ZIOff"
-    go shovelManagement(&badUri, true)
+    go zeroImpactMonitor(&badUri, ziStatusFeeds, true)
 
     time.Sleep(1 * time.Second)
 }
