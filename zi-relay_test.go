@@ -120,20 +120,20 @@ func ziOffHandle(w http.ResponseWriter, r *http.Request){
 }
 
 func TestShovelStartManagement(t *testing.T){
-    rabbitProg = "../zi-relay/sleep-three.sh"
-    chefClient = "../zi-relay/sleep-seven.sh"
+    rabbitProg = "./sleep-three.sh"
+    chefClient = "./sleep-seven.sh"
     testManagement("http://localhost:7000/ZIOn", "shovel", t)
 }
 
 func TestShovelStopManagement(t *testing.T){
-    rabbitProg = "../zi-relay/sleep-three.sh"
-    chefClient = "../zi-relay/sleep-seven.sh"
+    rabbitProg = "./sleep-three.sh"
+    chefClient = "./sleep-seven.sh"
     testManagement("http://localhost:7000/ZIOff", "shovel", t)
 }
 
 func TestChefClientManagment(t *testing.T) {
-    rabbitProg = "../zi-relay/sleep-seven.sh"
-    chefClient = "../zi-relay/sleep-three.sh"
+    rabbitProg = "./sleep-seven.sh"
+    chefClient = "./sleep-three.sh"
     testManagement("http://localhost:7000/ZIOn", "chef", t)
 }
 
