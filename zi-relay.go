@@ -24,7 +24,7 @@ var (
     rabbitProg   = "/etc/init.d/rabbitmq-stopable-shovel"
     chefClient   = "chef-client"
     quitChan chan bool
-    chefStatusChan chan bool
+    cmdStatus map[string] chan bool
 )
 
 type zeroimpactResponse struct {
@@ -35,7 +35,8 @@ type zeroimpactResponse struct {
 **  serve status/health requests
 *   kill application when told to
 */
-func statusServer(quitChan chan bool, chefStatusChan chan bool) {
+//func statusServer(quitChan chan bool, chefStatusChan chan bool) {
+func statusServer() {
     http.HandleFunc("/ping", pingHandle)
     http.HandleFunc("/quit", quitHandle)
 
@@ -53,8 +54,20 @@ func pingHandle(w http.ResponseWriter, r *http.Request){
 }
 
 func quitHandle(w http.ResponseWriter, r *http.Request) {
-    fmt.Fprintf(w, "zi-relay is now shutting down\n")
-    quitChan <- true
+    //  check if a chef-client run is on-going
+    canStop := false
+    for _, sChan := range cmdStatus {
+        sChan <- true
+        cStatus := <-sChan
+        canStop = canStop || cStatus
+    }
+    if canStop {
+        fmt.Fprintf(w, "one or more external commands are running.  Please wait a few minutes and try again")
+        quitChan <- false
+    } else {
+        fmt.Fprintf(w, "zi-relay is now shutting down\n")
+        quitChan <- true
+    }
 }
 
 /*
@@ -86,32 +99,6 @@ func remove_pidfile(){
 }
 
 
-//  turn stopable shovel on or off
-func shovelManagement(ziStatus chan bool, verbose bool) {
-    //  verified that stopping a stoped shovel or starting a started shovel doesn't
-    //  effect the rabbit broker.  the rabbit broker informs the caller that the 
-    //  current state matches desires state and to go away.  it says 'err' but that's
-    //  a gentle way of saying, 'YES!  AND I AM ALREADY!'
-    for {
-        usingBats := <-ziStatus
-        command := "stop"
-        if usingBats {
-            command = "start"
-        }
-        if verbose {
-            log.Println(rabbitProg + " " + command)
-        }
-        cmd := exec.Command(rabbitProg, command)
-        var out bytes.Buffer
-        cmd.Stdout = &out
-        cmd.Stderr = &out
-        err := cmd.Run()
-        if err != nil {
-            log.Printf(command + " command failed with: %s", err)
-            log.Printf("outputs were: %s", out)
-        }
-    }
-}
 
 /*
 **  zeroImpactMonitor - polls the zero impact status interface and notifies
@@ -141,45 +128,104 @@ func zeroImpactMonitor(uri *string, feeds map[string] chan bool, verbose bool) {
     }
 }
 
+//  turn stopable shovel on or off
+func shovelManagement(feed, status chan bool, verbose bool) {
+    //  asynchronously report is chef running status
+    shovelRunningStatus := false
+    go func(){
+        for {
+            <-status
+            status <- shovelRunningStatus
+        }
+    }()
+    //  verified that stopping a stoped shovel or starting a started shovel doesn't
+    //  effect the rabbit broker.  the rabbit broker informs the caller that the 
+    //  current state matches desires state and to go away.  it says 'err' but that's
+    //  a gentle way of saying, 'YES!  AND I AM ALREADY!'
+    for {
+        usingBats := <-feed
+        shovelRunningStatus = true
+        command := "stop"
+        if usingBats {
+            command = "start"
+        }
+        if verbose {
+            log.Println(rabbitProg + " " + command)
+        }
+        cmd := exec.Command(rabbitProg, command)
+        var out bytes.Buffer
+        cmd.Stdout = &out
+        cmd.Stderr = &out
+        err := cmd.Run()
+        if err != nil {
+            handle_cmd_error(err, out)
+        }
+        shovelRunningStatus = false
+    }
+}
 
-//  starts the chef-client run and selects across feed and status
-//  if feed is true and there isn't a chef-client running, start one
-//    if chef-client is running, ignore whatever comes in on feed
-//  starts a go routine that shares state (chefStatus) with this.  it
-//  will return chefStatus on status whenever it is called
-func chefClientExecutor(feed chan bool, status chan bool, verbose bool){
+/*  
+**  chefClientManagement - handles execution of chef client and coordination
+**                       with other functions
+**  starts the chef-client run and selects across feed and status
+**  if feed is true and there isn't a chef-client running, start one
+**    if chef-client is running, ignore whatever comes in on feed
+**  starts a go routine that shares state (chefStatus) with this.  it
+**  will return chefStatus on status whenever it is called
+*/
+func chefClientManagement(feed, status chan bool, verbose bool){
+    //  asynchronously report is chef running status
     chefStatus := false
     go func(){
-        <-status
-        status <- chefStatus
+        for {
+            <-status
+            status <- chefStatus
+        }
     }()
 
-    cmdDone := make(chan error)
-    var cmd *exec.Cmd
-    var out bytes.Buffer
-    for {
-        select {
-            case start := <-feed:
-                //  start a chef-client if one isn't running
-                if start && !chefStatus {
-                    chefStatus = true
-                    cmd = exec.Command(chefClient)
-                    cmd.Stdout = &out
-                    cmd.Stderr = &out
-                    go func(){
-                        cmdDone <- cmd.Run()
-                    }()
-                } //  else is a no-op
-            case err := <-cmdDone:
-                chefStatus = false
-                if err != nil{
-                    log.Printf(chefClient + " command failed with: %s", err)
-                    log.Printf("outputs were: %s", out)
-                }
-                cmd = nil
-
+    //  asynchronously set boolean for 'should start another chef client run'
+    feedStatus := false
+    go func(){
+        for {
+            feedStatus = <-feed
         }
+    }()
+
+    for {
+        if feedStatus {
+            if verbose {
+                log.Println("ZI is on, start a chef-client run")
+            }
+            chefStatus = true
+            cmd := exec.Command(chefClient)
+            var out bytes.Buffer
+            cmd.Stdout = &out
+            cmd.Stderr = &out
+            err := cmd.Run()
+            if verbose {
+                log.Println("Finished a chef-client run")
+            }
+            if err != nil {
+                handle_cmd_error(err, out)
+            }
+            chefStatus = false
+        } else if !feedStatus && verbose {
+            log.Println("ZI is off.  Do nothing")
+        }
+
+        time.Sleep(1 * time.Second)
     }
+}
+
+/*
+**  handle_cmd_error - function to handle errors in command line executions
+**                   only prints stdout and stderr to stdout for now, will 
+**                   do more later
+**
+*/
+func handle_cmd_error(err error, out bytes.Buffer) {
+    log.Printf(chefClient + " command failed with: %s", err)
+    log.Printf("outputs were: %s", out)
 }
 
 /*
@@ -197,20 +243,26 @@ func main(){
     ziStatusFeeds := make(map[string] chan bool, 2)
     ziStatusFeeds["shovel"] = make(chan bool, 10)
     ziStatusFeeds["chef"] = make(chan bool, 10)
+    cmdStatus = make(map[string] chan bool, 2)
+    cmdStatus["shovel"] = make(chan bool)
+    cmdStatus["chef"] = make(chan bool)
     go zeroImpactMonitor(uri, ziStatusFeeds, *verbose)
 
     //  manage the stopable shovel
-    go shovelManagement(ziStatusFeeds["shovel"], *verbose)
+    go shovelManagement(ziStatusFeeds["shovel"], cmdStatus["shovel"], *verbose)
 
     //  manage the chef-client runs
-    chefStatusChan = make(chan bool)
-    go chefClientExecutor(ziStatusFeeds["chef"], chefStatusChan, *verbose)
+    go chefClientManagement(ziStatusFeeds["chef"], cmdStatus["chef"], *verbose)
 
     //  status Server also handles quiting
     quitChan = make(chan bool)
-    go statusServer(quitChan, chefStatusChan)
+    //go statusServer(quitChan, chefStatusChan)
+    go statusServer()
 
     //  block until quitting time
-    <-quitChan
+    quit := false
+    for !quit {
+        quit = <-quitChan
+    }
 }
 
