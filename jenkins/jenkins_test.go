@@ -56,3 +56,19 @@ func TestStartGood(t *testing.T) {
         t.Log("First postform a success!")
     }
 }
+
+func TestStartNoShipCode(t *testing.T) {
+    go dummyJenkins()
+
+    //  let server start
+    time.Sleep(time.Second)
+
+    ciURL = "http://localhost:7005/promote"
+    local := &PromoteToShip{}
+    err := local.Start()
+    if err != nil {
+        t.Logf("Correctly failed lack of shipcode with: %s", err)
+    } else {
+        t.Error("Succeeded when it should have failed from lack of shipcode!")
+    }
+}
