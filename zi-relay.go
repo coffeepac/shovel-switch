@@ -165,15 +165,19 @@ func shovelManagement(feed, status chan bool, verbose bool) {
 }
 
 /*  
-**  chefClientManagement - handles execution of chef client and coordination
+**  ciManagement - handles execution of ci pieces and coordination
 **                       with other functions
-**  starts the chef-client run and selects across feed and status
-**  if feed is true and there isn't a chef-client running, start one
-**    if chef-client is running, ignore whatever comes in on feed
-**  starts a go routine that shares state (chefStatus) with this.  it
-**  will return chefStatus on status whenever it is called
+**  listens on the feed channel in a go routine which sets the feedStatus
+**  which lets the ci job start
+**    if the ci job is running, ignore whatever comes in on feed
+**  starts a go routine that shares state (ciStatus) with this.  it
+**  will return ciStatus on status whenever it is called
+**  takes a function which handles the interop with the ci command to run
+**  and any error handling.  
+**    returns an error
 */
-func chefClientManagement(feed, status chan bool, verbose bool){
+type ciAction func(verbose bool) (err error)
+func ciManagement(name string, feed, status chan bool, action ciAction, verbose bool){
     //  asynchronously report is chef running status
     chefStatus := false
     go func(){
@@ -197,16 +201,9 @@ func chefClientManagement(feed, status chan bool, verbose bool){
                 log.Println("ZI is on, start a chef-client run")
             }
             chefStatus = true
-            cmd := exec.Command(chefClient)
-            var out bytes.Buffer
-            cmd.Stdout = &out
-            cmd.Stderr = &out
-            err := cmd.Run()
-            if verbose {
-                log.Println("Finished a chef-client run")
-            }
+            err := action(verbose)
             if err != nil {
-                handle_cmd_error(err, out)
+                log.Println(name + " action failed")
             }
             chefStatus = false
         } else if !feedStatus && verbose {
@@ -215,6 +212,25 @@ func chefClientManagement(feed, status chan bool, verbose bool){
 
         time.Sleep(1 * time.Second)
     }
+}
+
+/*
+**  chefClientAction - wrapper function that holds the chef client ci action
+**
+*/
+func chefClientAction(verbose bool) (err error) {
+    cmd := exec.Command(chefClient)
+    var out bytes.Buffer
+    cmd.Stdout = &out
+    cmd.Stderr = &out
+    err = cmd.Run()
+    if verbose {
+        log.Println("Finished a chef-client run")
+    }
+    if err != nil {
+        handle_cmd_error(err, out)
+    }
+    return err
 }
 
 /*
@@ -252,7 +268,7 @@ func main(){
     go shovelManagement(ziStatusFeeds["shovel"], cmdStatus["shovel"], *verbose)
 
     //  manage the chef-client runs
-    go chefClientManagement(ziStatusFeeds["chef"], cmdStatus["chef"], *verbose)
+    go ciManagement("chef-client", ziStatusFeeds["chef"], cmdStatus["chef"], chefClientAction, *verbose)
 
     //  status Server also handles quiting
     quitChan = make(chan bool)

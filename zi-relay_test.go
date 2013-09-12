@@ -151,7 +151,7 @@ func testManagement(testUri, appName string, t *testing.T) {
 
     go zeroImpactMonitor(&testUri, ziStatusFeeds, true)
     go shovelManagement(ziStatusFeeds["shovel"], cmdStatus["shovel"], true)
-    go chefClientManagement(ziStatusFeeds["chef"], cmdStatus["chef"], true)
+    go ciManagement("chef-sleep-client", ziStatusFeeds["chef"], cmdStatus["chef"], chefClientAction, true)
 
     //  lets all go routines start
     time.Sleep(3 * time.Second)
