@@ -17,6 +17,7 @@ var (
     uri          = flag.String("uri", "http://zeroimpact.mtnsatcloud.com:8084/v1.0/connectionStatus/", "ZeroImpact URI")
     pidfile      = flag.String("pidfile", "", "optional, write pid of self to here")
     healthport   = flag.Int("healthport", 7003, "port to listen for ping/quit requests on")
+    shipcode     = flag.String("shipcode", "UNKNOWN", "shipcode to use as lookup into chef-server for jenkins promote job")
     verbose      = flag.Bool("verbose", false, "increase logging output")
 )
 
@@ -177,7 +178,7 @@ func shovelManagement(feed, status chan bool, verbose bool) {
 **    returns an error
 */
 type ciAction func(verbose bool) (err error)
-func ciManagement(name string, feed, status chan bool, action ciAction, verbose bool){
+func ciManagement(name string, feed, status chan bool, action ciAction, sleepSeconds int, verbose bool){
     //  asynchronously report is chef running status
     chefStatus := false
     go func(){
@@ -210,7 +211,7 @@ func ciManagement(name string, feed, status chan bool, action ciAction, verbose 
             log.Println("ZI is off.  Do nothing")
         }
 
-        time.Sleep(1 * time.Second)
+        time.Sleep(sleepSeconds * time.Second)
     }
 }
 
@@ -230,6 +231,19 @@ func chefClientAction(verbose bool) (err error) {
     if err != nil {
         handle_cmd_error(err, out)
     }
+    return err
+}
+
+/*
+**  fetchCIArtifacts - wrapper function around the call to our lib for handling running
+**               promote-to-ship
+**
+**  all of the REST calls will be in the the promote-to-ship wrapper lib
+*/
+func fetchCIArtifacts(verbose bool) (err error) {
+    promote := &jenkins.PromoteToShip{shipcode: shipcode}
+    promote.Start()
+    err := promote.Wait()
     return err
 }
 
@@ -268,7 +282,7 @@ func main(){
     go shovelManagement(ziStatusFeeds["shovel"], cmdStatus["shovel"], *verbose)
 
     //  manage the chef-client runs
-    go ciManagement("chef-client", ziStatusFeeds["chef"], cmdStatus["chef"], chefClientAction, *verbose)
+    go ciManagement("chef-client", ziStatusFeeds["chef"], cmdStatus["chef"], chefClientAction, 1, *verbose)
 
     //  status Server also handles quiting
     quitChan = make(chan bool)
