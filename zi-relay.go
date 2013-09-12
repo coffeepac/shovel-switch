@@ -11,6 +11,7 @@ import (
   json "encoding/json"
   http "net/http"
   exec "os/exec"
+  jenkins "./jenkins"
 )
 
 var (
@@ -22,10 +23,11 @@ var (
 )
 
 var (
-    rabbitProg   = "/etc/init.d/rabbitmq-stopable-shovel"
-    chefClient   = "chef-client"
-    quitChan chan bool
-    cmdStatus map[string] chan bool
+    rabbitProg  = "/etc/init.d/rabbitmq-stopable-shovel"
+    chefClient  = "chef-client"
+    quitChan    chan bool
+    stopZIMon   chan bool
+    cmdStatus   map[string] chan bool
 )
 
 type zeroimpactResponse struct {
@@ -36,7 +38,6 @@ type zeroimpactResponse struct {
 **  serve status/health requests
 *   kill application when told to
 */
-//func statusServer(quitChan chan bool, chefStatusChan chan bool) {
 func statusServer() {
     http.HandleFunc("/ping", pingHandle)
     http.HandleFunc("/quit", quitHandle)
@@ -67,6 +68,7 @@ func quitHandle(w http.ResponseWriter, r *http.Request) {
         quitChan <- false
     } else {
         fmt.Fprintf(w, "zi-relay is now shutting down\n")
+        stopZIMon <- false
         quitChan <- true
     }
 }
@@ -107,8 +109,15 @@ func remove_pidfile(){
 **
 */
 func zeroImpactMonitor(uri *string, feeds map[string] chan bool, verbose bool) {
-    //  poll the zi status interface forever
-    for {
+    //  poll the zi status interface until told to stop
+    monitor := true
+    go func(){
+        for {
+            monitor = <-stopZIMon
+        }
+    }()
+
+    for monitor {
         resp, err := http.Get(*uri)
         if err != nil {
             log.Printf("Failed to access ZeroImpact service at %s with error %s\n", *uri, err)
@@ -199,7 +208,7 @@ func ciManagement(name string, feed, status chan bool, action ciAction, sleepSec
     for {
         if feedStatus {
             if verbose {
-                log.Println("ZI is on, start a chef-client run")
+                log.Println(name + ": ZI is on, begin the job")
             }
             chefStatus = true
             err := action(verbose)
@@ -208,10 +217,10 @@ func ciManagement(name string, feed, status chan bool, action ciAction, sleepSec
             }
             chefStatus = false
         } else if !feedStatus && verbose {
-            log.Println("ZI is off.  Do nothing")
+            log.Println(name + ": ZI is off.  Do nothing")
         }
 
-        time.Sleep(sleepSeconds * time.Second)
+        time.Sleep(time.Duration(sleepSeconds) * time.Second)
     }
 }
 
@@ -241,13 +250,13 @@ func chefClientAction(verbose bool) (err error) {
 **  all of the REST calls will be in the the promote-to-ship wrapper lib
 */
 func fetchCIArtifacts(verbose bool) (err error) {
-    promote := &jenkins.PromoteToShip{Shipcode: shipcode}
+    promote := &jenkins.PromoteToShip{Shipcode: *shipcode}
     err = promote.Start()
     if err != nil {
         log.Println("Failed to start promotion job with error: %s", err)
         return err
     }
-    err = promote.Wait()
+    err = promote.Wait(1)
     if err != nil {
         log.Println("Failed to wait for promotion job with error: %s", err)
     }
@@ -277,12 +286,14 @@ func main(){
     check_pidfile()
     defer remove_pidfile()
 
-    ziStatusFeeds := make(map[string] chan bool, 2)
+    ziStatusFeeds := make(map[string] chan bool, 3)
     ziStatusFeeds["shovel"] = make(chan bool, 10)
     ziStatusFeeds["chef"] = make(chan bool, 10)
-    cmdStatus = make(map[string] chan bool, 2)
+    ziStatusFeeds["promote"] = make(chan bool, 10)
+    cmdStatus = make(map[string] chan bool, 3)
     cmdStatus["shovel"] = make(chan bool)
     cmdStatus["chef"] = make(chan bool)
+    cmdStatus["promote"] = make(chan bool)
     go zeroImpactMonitor(uri, ziStatusFeeds, *verbose)
 
     //  manage the stopable shovel
@@ -291,9 +302,11 @@ func main(){
     //  manage the chef-client runs
     go ciManagement("chef-client", ziStatusFeeds["chef"], cmdStatus["chef"], chefClientAction, 1, *verbose)
 
+    //  manage the promote-to-ship runs
+    go ciManagement("promote-to-ship", ziStatusFeeds["promote"], cmdStatus["promote"], fetchCIArtifacts, 1, *verbose)
+
     //  status Server also handles quiting
     quitChan = make(chan bool)
-    //go statusServer(quitChan, chefStatusChan)
     go statusServer()
 
     //  block until quitting time

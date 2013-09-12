@@ -16,6 +16,7 @@ var (
 
 func TestStatusServer(t *testing.T) {
     quitChan = make(chan bool, 1)
+    stopZIMon = make(chan bool, 10)
     cmdStatus = make(map[string] chan bool, 2)
     cmdStatus["shovel"] = make(chan bool)
     cmdStatus["chef"] = make(chan bool)
@@ -120,20 +121,20 @@ func ziOffHandle(w http.ResponseWriter, r *http.Request){
 }
 
 func TestShovelStartManagement(t *testing.T){
-    rabbitProg = "./sleep-three.sh"
-    chefClient = "./sleep-seven.sh"
+    rabbitProg = "./sleep-short.sh"
+    chefClient = "./sleep-long.sh"
     testManagement("http://localhost:7000/ZIOn", "shovel", t)
 }
 
 func TestShovelStopManagement(t *testing.T){
-    rabbitProg = "./sleep-three.sh"
-    chefClient = "./sleep-seven.sh"
+    rabbitProg = "./sleep-short.sh"
+    chefClient = "./sleep-long.sh"
     testManagement("http://localhost:7000/ZIOff", "shovel", t)
 }
 
 func TestChefClientManagment(t *testing.T) {
-    rabbitProg = "./sleep-seven.sh"
-    chefClient = "./sleep-three.sh"
+    rabbitProg = "./sleep-long.sh"
+    chefClient = "./sleep-short.sh"
     testManagement("http://localhost:7000/ZIOn", "chef", t)
 }
 
@@ -146,17 +147,22 @@ func testManagement(testUri, appName string, t *testing.T) {
     cmdStatus["shovel"] = make(chan bool)
     cmdStatus["chef"] = make(chan bool)
 
+    stopZIMon = make(chan bool, 1)
+
     go dummyZI()
     time.Sleep(1 * time.Second)
 
     go zeroImpactMonitor(&testUri, ziStatusFeeds, true)
     go shovelManagement(ziStatusFeeds["shovel"], cmdStatus["shovel"], true)
-    go ciManagement("chef-sleep-client", ziStatusFeeds["chef"], cmdStatus["chef"], chefClientAction, true)
+    go ciManagement("chef-sleep-client", ziStatusFeeds["chef"], cmdStatus["chef"], chefClientAction, 1, true)
 
     //  lets all go routines start
-    time.Sleep(3 * time.Second)
+    time.Sleep(2 * time.Second)
 
     cmdStatus[appName] <- true
+
+    //  shove a sleep in to make sure we don't grab our own message
+    time.Sleep(time.Second)
     appNameStatus := <-cmdStatus[appName]
 
     if appNameStatus {
@@ -167,7 +173,10 @@ func testManagement(testUri, appName string, t *testing.T) {
 
     //  wait for the 3 second sleep to finish
     time.Sleep(2 * time.Second)
+
+    //  shove a sleep in to make sure we don't grab our own message
     cmdStatus[appName] <- true
+    time.Sleep(1 * time.Second)
     appNameStatus = <-cmdStatus[appName]
 
     if !appNameStatus {
@@ -176,7 +185,7 @@ func testManagement(testUri, appName string, t *testing.T) {
         t.Error(appName + " command is reporting it is running.  It should not be")
     }
 
+    stopZIMon <- false
     ziStatusFeeds = nil
     cmdStatus = nil
 }
-
