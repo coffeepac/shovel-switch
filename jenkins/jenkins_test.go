@@ -11,6 +11,7 @@ var (
     dummyJenkinsLatch = false
     jobStarted = false
     jobCompleted = false
+    jobSuccess = true
     shipcode string
 )
 
@@ -67,8 +68,10 @@ func jobResultHandle(w http.ResponseWriter, r *http.Request) {
     } else {
         if !jobCompleted {
             fmt.Fprintf(w, "{\"result\":null}")
-        } else {
+        } else if jobSuccess {
             fmt.Fprintf(w, "{\"result\":\"SUCCESS\"}")
+        } else {
+            fmt.Fprintf(w, "{\"result\":\"FAILURE\"}")
         }
     }
 }
@@ -105,32 +108,92 @@ func TestStartNoShipCode(t *testing.T) {
     }
 }
 
-func TestWaitGood(t *testing.T) {
+func exerciseWait(localcode string, jobSuccessLocal bool) (local *PromoteToShip, err error){
     go dummyJenkins()
 
     time.Sleep(time.Second)
+    ciPostURL = "http://localhost:7005/promote"
     ciLastBuild = "http://localhost:7005/lastBuild"
     ciResult = "jobResult"
 
-    //  wait 5 seconds to flip from job not started to job started
+    jobStarted = false
+    jobCompleted = false
+
+    //  wait 3 seconds to flip from job not started to job started
     go func() {
-        time.Sleep(5 * time.Second)
+        time.Sleep(3 * time.Second)
         jobStarted = true
     }()
 
-    //  wait 10 seconds to flip from job not complete to job completed
+    //  wait 6 seconds to flip from job not complete to job completed
+    jobSuccess = jobSuccessLocal
     go func() {
-        time.Sleep(10 * time.Second)
+        time.Sleep(6 * time.Second)
         jobCompleted = true
     }()
 
-    shipcode = "localWait"
-    local := &PromoteToShip{Shipcode: shipcode}
-    err := local.Wait(1)
+    shipcode = localcode
+    local = &PromoteToShip{Shipcode: shipcode}
+    err = local.Start()
+    if err != nil {
+        return
+    }
+    err = local.Wait(1)
+    return
+}
+
+func TestWaitSuccess(t *testing.T) {
+    _, err := exerciseWait("localship", true)
 
     if err != nil {
         t.Errorf("Wait call failed when it shouldn't have with: %s", err)
     } else {
         t.Log("Wait experiences great success!")
+    }
+}
+
+func TestWaitFailure(t *testing.T) {
+    _, err := exerciseWait("localship", false)
+
+    if err == nil {
+        t.Error("Wait call succeeded when it shouldn't have with")
+    } else {
+        t.Logf("Wait correctly experienced failure with error: %s", err)
+    }
+}
+
+func TestWaitNoShipCode(t *testing.T) {
+    _, err := exerciseWait("", false)
+
+    if err == nil {
+        t.Error("Wait call succeeded when it shouldn't have with")
+    } else {
+        t.Logf("Wait correctly experienced failure with error: %s", err)
+    }
+
+}
+
+func TestWaitNoStart(t *testing.T) {
+    local := &PromoteToShip{Shipcode: shipcode}
+    err := local.Wait(1)
+    if err != nil {
+        if err.Error() == "Must call Start before waiting for the job to finish" {
+            t.Log("Correctly prevented Wait from executing if Start not called")
+        } else {
+            t.Errorf("Failed with unexpected error: %s", err)
+        }
+    } else {
+        t.Error("Succeeded when it shouldn't have")
+    }
+}
+
+func TestWaitDoubleWait(t *testing.T){
+    local, errOrig := exerciseWait("localship", false)
+    errRecall := local.Wait(1)
+
+    if errOrig.Error() == errRecall.Error() {
+        t.Log("errors agree!")
+    } else {
+        t.Errorf("Error changed.  Was:  %s, now is: %s", errOrig, errRecall)
     }
 }

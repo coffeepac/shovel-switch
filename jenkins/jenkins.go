@@ -22,6 +22,9 @@ var (
 */
 type PromoteToShip struct {
     Shipcode    string
+    started bool
+    waited  bool
+    olderr  error
 }
 
 /*
@@ -43,13 +46,15 @@ type lastBuildResponse struct {
 **  struct rep for result resp response
 */
 type jobResult struct {
-    Result  string  `json:"result"`
+    Result  interface{}  `json:"result"`  //  null is a valid bit here, thats not a string
 }
 
 /*
 **  Start - queues up the promote to ship job with this Shipcode on jenkins-ci
 */
 func (p *PromoteToShip) Start() (err error) {
+    p.started = true
+    p.waited = false  //  is default, but if we call posting twice against same jenkins reference
     //  post the job!
     resp, err := http.PostForm(ciPostURL,url.Values{"SHIPNAME": {p.Shipcode}})
     if err != nil {
@@ -73,6 +78,16 @@ func (p *PromoteToShip) Start() (err error) {
 **  TODO:  add a timeout so we don't loop forever
 */
 func (p *PromoteToShip) Wait(sleepSeconds int) (err error) {
+    defer func() {
+        p.olderr = err
+    }()
+
+    //  only let this go if we have started and haven't waited
+    if !p.started {
+        return errors.New("Must call Start before waiting for the job to finish")
+    } else if p.waited {
+        return p.olderr  //  not sure if we want to do something to indicate this error has been returned already
+    }
     //  poll lastBuild until our job shows up there.
     //  lastBuild shows current build, if there is one
     jobNotStarted := true
@@ -90,10 +105,9 @@ func (p *PromoteToShip) Wait(sleepSeconds int) (err error) {
             return err
         }
 
-        if lastBuild.LastBuild.Actions.Parameters.Value == p.Shipcode {
+        if lastBuild.LastBuild.Actions[0].Parameters[0].Value == p.Shipcode {
             jobNotStarted = false
         }
-
         time.Sleep(time.Duration(sleepSeconds) * time.Second)
     }
 
@@ -113,15 +127,15 @@ func (p *PromoteToShip) Wait(sleepSeconds int) (err error) {
             return err
         }
 
-        if result.Result != "" {
+        if result.Result != nil {
             jobRunning = false
         }
 
         time.Sleep(time.Duration(sleepSeconds) * time.Second)
     }
 
-    if result.Result != "SUCCESS" {
-        err = errors.New("Job did not succeed.  Result is: " + result.Result)
+    if result.Result.(string) != "SUCCESS" {
+        err = errors.New("Job did not succeed.  Result is: " + result.Result.(string))
     } else {
         err = nil
     }
