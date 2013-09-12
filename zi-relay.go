@@ -241,9 +241,16 @@ func chefClientAction(verbose bool) (err error) {
 **  all of the REST calls will be in the the promote-to-ship wrapper lib
 */
 func fetchCIArtifacts(verbose bool) (err error) {
-    promote := &jenkins.PromoteToShip{shipcode: shipcode}
-    promote.Start()
-    err := promote.Wait()
+    promote := &jenkins.PromoteToShip{Shipcode: shipcode}
+    err = promote.Start()
+    if err != nil {
+        log.Println("Failed to start promotion job with error: %s", err)
+        return err
+    }
+    err = promote.Wait()
+    if err != nil {
+        log.Println("Failed to wait for promotion job with error: %s", err)
+    }
     return err
 }
 
