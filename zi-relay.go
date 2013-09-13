@@ -302,7 +302,8 @@ func main(){
     go ciManagement("chef-client", ziStatusFeeds["chef"], cmdStatus["chef"], chefClientAction, 1, *verbose)
 
     //  manage the promote-to-ship runs
-    go ciManagement("promote-to-ship", ziStatusFeeds["promote"], cmdStatus["promote"], fetchCIArtifacts, 1, *verbose)
+    //   pause for 25 minutes between runs (25 * 60 = 1500 seconds)
+    go ciManagement("promote-to-ship", ziStatusFeeds["promote"], cmdStatus["promote"], fetchCIArtifacts, 1500, *verbose)
 
     //  status Server also handles quiting
     quitChan = make(chan bool)
