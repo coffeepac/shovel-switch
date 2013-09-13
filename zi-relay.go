@@ -11,7 +11,6 @@ import (
   json "encoding/json"
   http "net/http"
   exec "os/exec"
-  jenkins "./jenkins"
 )
 
 var (
@@ -250,7 +249,7 @@ func chefClientAction(verbose bool) (err error) {
 **  all of the REST calls will be in the the promote-to-ship wrapper lib
 */
 func fetchCIArtifacts(verbose bool) (err error) {
-    promote := &jenkins.PromoteToShip{Shipcode: *shipcode}
+    promote := &PromoteToShip{Shipcode: *shipcode}
     err = promote.Start()
     if err != nil {
         log.Println("Failed to start promotion job with error: %s", err)

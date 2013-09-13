@@ -1,4 +1,4 @@
-package jenkins
+package main
 
 import (
     "time"
@@ -12,7 +12,6 @@ var (
     jobStarted = false
     jobCompleted = false
     jobSuccess = true
-    shipcode string
 )
 
 func dummyJenkins(){
@@ -56,7 +55,7 @@ func lastBuildHandle(w http.ResponseWriter, r *http.Request) {
         if !jobStarted {
             fmt.Fprintf(w, "{\"lastBuild\":{\"actions\":[{\"parameters\":[{\"name\":\"SHIPCODE\",\"value\":\"nachoShip\"}]},{}],\"url\":\"http://localhost:7005//\"}}")
         } else {
-            fmt.Fprintf(w, "{\"lastBuild\":{\"actions\":[{\"parameters\":[{\"name\":\"SHIPCODE\",\"value\":\"" + shipcode + "\"}]},{}],\"url\":\"http://localhost:7005//\"}}")
+            fmt.Fprintf(w, "{\"lastBuild\":{\"actions\":[{\"parameters\":[{\"name\":\"SHIPCODE\",\"value\":\"" + *shipcode + "\"}]},{}],\"url\":\"http://localhost:7005//\"}}")
         }
     }
 }
@@ -132,8 +131,8 @@ func exerciseWait(localcode string, jobSuccessLocal bool) (local *PromoteToShip,
         jobCompleted = true
     }()
 
-    shipcode = localcode
-    local = &PromoteToShip{Shipcode: shipcode}
+    *shipcode = localcode
+    local = &PromoteToShip{Shipcode: *shipcode}
     err = local.Start()
     if err != nil {
         return
@@ -174,7 +173,7 @@ func TestWaitNoShipCode(t *testing.T) {
 }
 
 func TestWaitNoStart(t *testing.T) {
-    local := &PromoteToShip{Shipcode: shipcode}
+    local := &PromoteToShip{Shipcode: *shipcode}
     err := local.Wait(1)
     if err != nil {
         if err.Error() == "Must call Start before waiting for the job to finish" {
