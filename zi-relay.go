@@ -311,10 +311,10 @@ func main(){
     go zeroImpactMonitor(uri, ziStatusFeeds, *verbose)
 
     //  manage the stopable shovel
-    go shovelManagement(ziStatusFeeds["shovel"], cmdStatusReq["shovel"], cmdStatusResp["shovel"], 1, *verbose)
+    go shovelManagement(ziStatusFeeds["shovel"], cmdStatusReq["shovel"], cmdStatusResp["shovel"], 5, *verbose)
 
     //  manage the chef-client runs
-    go ciManagement("chef-client", ziStatusFeeds["chef"], cmdStatusReq["chef"],cmdStatusResp["chef"], chefClientAction, 1, *verbose)
+    go ciManagement("chef-client", ziStatusFeeds["chef"], cmdStatusReq["chef"],cmdStatusResp["chef"], chefClientAction, 5, *verbose)
 
     //  manage the promote-to-ship runs
     //   pause for 25 minutes between runs (25 * 60 = 1500 seconds)

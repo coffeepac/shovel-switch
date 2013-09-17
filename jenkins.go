@@ -59,9 +59,9 @@ func (p *PromoteToShip) Start() (err error) {
     resp, err := http.PostForm(ciPostURL,url.Values{"SHIPNAME": {p.Shipcode}})
     if err != nil {
         return err
-    } else if resp.StatusCode != 201 {
+    } else if resp.StatusCode != 201 && resp.StatusCode != 302 {
         dumpResponse, _ := httputil.DumpResponse(resp, true)
-        return errors.New("Should have gotten a 201 from the job post, received a " + strconv.Itoa(resp.StatusCode) + " with a body of: " + string(dumpResponse))
+        return errors.New("Should have gotten a 201 or 302 from the job post, received a " + strconv.Itoa(resp.StatusCode) + " with a body of: " + string(dumpResponse))
     }
     return nil
 }
