@@ -14,7 +14,7 @@ var (
   ciURL     = "http://jenkins-cd.mtnsatcloud.com/job/promote-to-ship/"
   ciPostURL = ciURL + "buildWithParameters"
   ciLastBuild = ciURL + "api/json?depth=1&tree=lastBuild[actions[parameters[name,value]]],url"
-  ciResult  = "api/json?tree=result"
+  ciResult  = ciURL + "api/json?tree=result"
 )
 
 /*
