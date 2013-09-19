@@ -13,8 +13,8 @@ import (
 var (
   ciURL     = "http://jenkins-cd.mtnsatcloud.com/job/promote-to-ship/"
   ciPostURL = ciURL + "buildWithParameters"
-  ciLastBuild = ciURL + "api/json?depth=1&tree=lastBuild[actions[parameters[name,value]]],url"
-  ciResult  = ciURL + "api/json?tree=result"
+  ciLastBuild = ciURL + "api/json?depth=1&tree=lastBuild[actions[parameters[name,value]],url]"
+  ciResult  = "api/json?tree=result" //  doesn't have ciURL on it, need the job number which comes from ciLastBuild result
 )
 
 /*
