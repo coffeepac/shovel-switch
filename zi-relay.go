@@ -263,12 +263,12 @@ func fetchCIArtifacts(verbose bool) (err error) {
     promote := &PromoteToShip{Shipcode: *shipcode}
     err = promote.Start()
     if err != nil {
-        log.Println("Failed to start promotion job with error: %s", err)
+        log.Printf("Failed to start promotion job with error: %s\n", err)
         return err
     }
     err = promote.Wait(1)
     if err != nil {
-        log.Println("Failed to wait for promotion job with error: %s", err)
+        log.Printf("Failed to wait for promotion job with error: %s\n", err)
     }
     return err
 }
