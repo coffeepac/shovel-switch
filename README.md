@@ -12,3 +12,4 @@ ToDo:
 - quit chan messages get sent to all funcs for a clean exit
 - make managed services config driven, not hardcoded
 - consider having one generalized function, not one for each type
+- more debt/ToDos at BT-545
