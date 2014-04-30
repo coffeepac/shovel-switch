@@ -17,7 +17,6 @@ var (
     healthport   = flag.Int("healthport", 7003, "port to listen for ping/quit requests on")
     shipcode     = flag.String("shipcode", "UNKNOWN", "shipcode to use as lookup into chef-server for jenkins promote job")
     verbose      = flag.Bool("verbose", false, "increase logging output")
-    configfile   = flag.String("config", "", "full path to config file")
 )
 
 var (
