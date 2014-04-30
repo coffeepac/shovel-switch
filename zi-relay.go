@@ -6,11 +6,9 @@ import (
   "log"
   "time"
   "fmt"
-  "bytes"
   "strconv"
   json "encoding/json"
   http "net/http"
-  exec "os/exec"
 )
 
 var (
@@ -19,13 +17,16 @@ var (
     healthport   = flag.Int("healthport", 7003, "port to listen for ping/quit requests on")
     shipcode     = flag.String("shipcode", "UNKNOWN", "shipcode to use as lookup into chef-server for jenkins promote job")
     verbose      = flag.Bool("verbose", false, "increase logging output")
+    configfile   = flag.String("config", "", "full path to config file")
 )
 
 var (
+    flowdcommand = "sv"
     rabbitProg  = "/etc/init.d/rabbitmq-stopable-shovel"
     chefClient  = "chef-client"
     quitChan    chan bool
     stopZIMon   chan bool
+    quitFeeds   map[string] chan bool
     cmdStatusReq    map[string] chan bool
     cmdStatusResp   map[string] chan bool
 )
@@ -70,6 +71,9 @@ func quitHandle(w http.ResponseWriter, r *http.Request) {
         fmt.Fprintf(w, "zi-relay is now shutting down\n")
         stopZIMon <- false
         quitChan <- true
+        for _, qChan := range quitFeeds {
+            qChan <- true
+        }
     }
 }
 
@@ -138,152 +142,6 @@ func zeroImpactMonitor(uri *string, feeds map[string] chan bool, verbose bool) {
     }
 }
 
-//  turn stopable shovel on or off
-func shovelManagement(feed, statusReq, statusResp chan bool, sleepSeconds int, verbose bool) {
-    //  asynchronously report is chef running status
-    shovelRunningStatus := false
-    go func(){
-        for {
-            <-statusReq
-            statusResp <- shovelRunningStatus
-        }
-    }()
-
-    //  asynchronously set boolean for which rabbit command to run
-    feedStatus := false
-    go func(){
-        for {
-            feedStatus = <-feed
-        }
-    }()
-
-    //  verified that stopping a stoped shovel or starting a started shovel doesn't
-    //  effect the rabbit broker.  the rabbit broker informs the caller that the 
-    //  current state matches desires state and to go away.  it says 'err' but that's
-    //  a gentle way of saying, 'YES!  AND I AM ALREADY!'
-    for {
-        shovelRunningStatus = true
-        command := "stop"
-        if feedStatus {
-            command = "start"
-        }
-        if verbose {
-            log.Println(rabbitProg + " " + command)
-        }
-        cmd := exec.Command(rabbitProg, command)
-        var out bytes.Buffer
-        cmd.Stdout = &out
-        cmd.Stderr = &out
-        err := cmd.Run()
-        if err != nil {
-            handle_cmd_error(err, out)
-        }
-        shovelRunningStatus = false
-
-        time.Sleep(time.Duration(sleepSeconds) * time.Second)
-    }
-}
-
-/*  
-**  ciManagement - handles execution of ci pieces and coordination
-**                       with other functions
-**  listens on the feed channel in a go routine which sets the feedStatus
-**  which lets the ci job start
-**    if the ci job is running, ignore whatever comes in on feed
-**  starts a go routine that shares state (ciStatus) with this.  it
-**  will return ciStatus on status whenever it is called
-**  takes a function which handles the interop with the ci command to run
-**  and any error handling.  
-**    returns an error
-*/
-type ciAction func(verbose bool) (err error)
-func ciManagement(name string, feed, statusReq, statusResp chan bool, action ciAction, sleepSeconds int, verbose bool){
-    //  asynchronously report is chef running status
-    chefStatus := false
-    go func(){
-        for {
-            <-statusReq
-            statusResp <- chefStatus
-        }
-    }()
-
-    //  asynchronously set boolean for 'should start another chef client run'
-    feedStatus := false
-    go func(){
-        for {
-            feedStatus = <-feed
-        }
-    }()
-
-    for {
-        if feedStatus {
-            if verbose {
-                log.Println(name + ": ZI is on, begin the job")
-            }
-            chefStatus = true
-            err := action(verbose)
-            if err != nil {
-                log.Println(name + " action failed")
-            }
-            chefStatus = false
-        } else if !feedStatus && verbose {
-            log.Println(name + ": ZI is off.  Do nothing")
-        }
-
-        time.Sleep(time.Duration(sleepSeconds) * time.Second)
-    }
-}
-
-/*
-**  chefClientAction - wrapper function that holds the chef client ci action
-**
-*/
-func chefClientAction(verbose bool) (err error) {
-    cmd := exec.Command(chefClient)
-    var out bytes.Buffer
-    cmd.Stdout = &out
-    cmd.Stderr = &out
-    err = cmd.Run()
-    if verbose {
-        log.Println("Finished a chef-client run")
-    }
-    if err != nil {
-        handle_cmd_error(err, out)
-    }
-    return err
-}
-
-/*
-**  fetchCIArtifacts - wrapper function around the call to our lib for handling running
-**               promote-to-ship
-**
-**  all of the REST calls will be in the the promote-to-ship wrapper lib
-*/
-func fetchCIArtifacts(verbose bool) (err error) {
-    promote := &PromoteToShip{Shipcode: *shipcode}
-    err = promote.Start()
-    if err != nil {
-        log.Printf("Failed to start promotion job with error: %s\n", err)
-        return err
-    }
-    err = promote.Wait(1)
-    if err != nil {
-        log.Printf("Failed to wait for promotion job with error: %s\n", err)
-    }
-    return err
-}
-
-/*
-**  handle_cmd_error - function to handle errors in command line executions
-**                   only prints stdout and stderr to stdout for now, will 
-**                   do more later
-**
-*/
-func handle_cmd_error(err error, out bytes.Buffer) {
-    log.Printf(chefClient + " command failed with: %s", err)
-    log.Printf("outputs were: %s", out)
-}
-
 /*
 **  main - handles creation of main go routines
 **       - flag parsing
@@ -296,29 +154,25 @@ func main(){
     check_pidfile()
     defer remove_pidfile()
 
-    ziStatusFeeds := make(map[string] chan bool, 3)
-    ziStatusFeeds["shovel"] = make(chan bool, 10)
-    ziStatusFeeds["chef"] = make(chan bool, 10)
-    ziStatusFeeds["promote"] = make(chan bool, 10)
-    cmdStatusReq = make(map[string] chan bool, 3)
-    cmdStatusReq["shovel"] = make(chan bool)
-    cmdStatusReq["chef"] = make(chan bool)
-    cmdStatusReq["promote"] = make(chan bool)
-    cmdStatusResp = make(map[string] chan bool, 3)
-    cmdStatusResp["shovel"] = make(chan bool)
-    cmdStatusResp["chef"] = make(chan bool)
-    cmdStatusResp["promote"] = make(chan bool)
+    ziStatusFeeds := make(map[string] chan bool, 2)
+    ziStatusFeeds["tbn"] = make(chan bool, 10)
+    ziStatusFeeds["vsat"] = make(chan bool, 10)
+    quitFeeds = make(map[string] chan bool, 2)
+    quitFeeds["tbn"] = make(chan bool)
+    quitFeeds["vsat"] = make(chan bool)
+    cmdStatusReq = make(map[string] chan bool, 2)
+    cmdStatusReq["tbn"] = make(chan bool)
+    cmdStatusReq["vsat"] = make(chan bool)
+    cmdStatusResp = make(map[string] chan bool, 2)
+    cmdStatusResp["tbn"] = make(chan bool)
+    cmdStatusResp["vsat"] = make(chan bool)
     go zeroImpactMonitor(uri, ziStatusFeeds, *verbose)
 
-    //  manage the stopable shovel
-    go shovelManagement(ziStatusFeeds["shovel"], cmdStatusReq["shovel"], cmdStatusResp["shovel"], 5, *verbose)
+    //  manage the TBN flowd
+    go flowdManagement(ziStatusFeeds["tbn"], quitFeeds["tbn"], cmdStatusReq["tbn"], cmdStatusResp["tbn"], 5, "mtn-tbn", "tbn", *verbose)
 
-    //  manage the chef-client runs
-    go ciManagement("chef-client", ziStatusFeeds["chef"], cmdStatusReq["chef"],cmdStatusResp["chef"], chefClientAction, 5, *verbose)
-
-    //  manage the promote-to-ship runs
-    //   pause for 25 minutes between runs (25 * 60 = 1500 seconds)
-    go ciManagement("promote-to-ship", ziStatusFeeds["promote"], cmdStatusReq["promote"], cmdStatusResp["promote"], fetchCIArtifacts, 1500, *verbose)
+    //  manage the harris vsat flowd
+    go flowdManagement(ziStatusFeeds["vsat"], quitFeeds["vsat"], cmdStatusReq["vsat"], cmdStatusResp["vsat"], 5, "harris-vsat", "vsat",*verbose)
 
     //  status Server also handles quiting
     quitChan = make(chan bool)
